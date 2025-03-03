@@ -3,38 +3,39 @@ import requests
 import PyPDF2
 import os
 import pyttsx3
+import xml.etree.ElementTree as ET
+
+tts_engine = pyttsx3.init()
+paused = False
 
 def search_research_articles(query):
-    """Fetch at least 10 research articles using Semantic Scholar API."""
+    """Fetch 10 research articles from arXiv API."""
     
-    API_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
+    API_URL = "http://export.arxiv.org/api/query"
     params = {
-        "query": query,
-        "fields": "title,authors,year,url",
-        "limit": 10  # Fetch 10 papers
+        "search_query": f"all:{query}",
+        "start": 0,
+        "max_results": 10  # Get 10 articles
     }
     
     response = requests.get(API_URL, params=params)
     
     if response.status_code != 200:
-        return "Error fetching research papers. Please try again later."
-    
-    data = response.json()
-    
-    if "data" not in data or not data["data"]:
-        return "No relevant research papers found. Try a different query."
-    
-    response_text = "### 🔎 Research Articles Found:\n\n"
-    for idx, paper in enumerate(data["data"][:10]):  # Limit to 10 articles
-        title = paper.get("title", "No Title")
-        year = paper.get("year", "Unknown Year")
-        authors = ", ".join([author["name"] for author in paper.get("authors", [])])
-        link = paper.get("url", "#")
-        
-        response_text += f"**{idx + 1}. [{title}]({link})** ({year})\n"
-        response_text += f"   👨‍🔬 Authors: {authors}\n\n"
+        return f"⚠️ Error fetching articles (Status: {response.status_code})."
 
-    return response_text
+    data = response.text  # arXiv returns XML, needs parsing
+    root = ET.fromstring(data)
+    
+    articles = []
+    for entry in root.findall("{http://www.w3.org/2005/Atom}entry"):
+        title = entry.find("{http://www.w3.org/2005/Atom}title").text
+        link = entry.find("{http://www.w3.org/2005/Atom}id").text
+        authors = ", ".join([author.find("{http://www.w3.org/2005/Atom}name").text for author in entry.findall("{http://www.w3.org/2005/Atom}author")])
+        summary = entry.find("{http://www.w3.org/2005/Atom}summary").text[:300] + "..."  # Shortened summary
+
+        articles.append(f"**📄 [{title}]({link})**\n👨‍🔬 Authors: {authors}\n📖 {summary}\n\n")
+
+    return "### 🔎 Research Articles Found:\n\n" + "\n".join(articles) if articles else "⚠️ No articles found."
 
 def summarize_file(file):
     """Read and summarize uploaded PDF or text file."""
@@ -69,10 +70,24 @@ def cite_paper(title, author, year, format_):
 
 def read_aloud(text):
     """Convert text to speech."""
-    engine = pyttsx3.init()
-    engine.say(text)
-    engine.runAndWait()
+    global paused
+    if not paused:
+        tts_engine.say(text)
+        tts_engine.runAndWait()
     return "Reading aloud..."
+
+def pause_reading():
+    """Pause text-to-speech."""
+    global paused
+    paused = True
+    tts_engine.stop()
+    return "Paused reading."
+
+def resume_reading(text):
+    """Resume text-to-speech."""
+    global paused
+    paused = False
+    return read_aloud(text)
 
 def chatbot_function(input_text, cite_details, citation_format, file):
     """Main chatbot function to handle all tasks."""
@@ -108,10 +123,14 @@ def main():
         file = gr.File(label="📂 Upload File (PDF/TXT)")
         output = gr.Textbox(label="📋 Response", interactive=False, lines=15)  # Multiline output
         read_button = gr.Button("🔊 Read Aloud")
+        pause_button = gr.Button("⏸ Pause")
+        resume_button = gr.Button("▶ Resume")
         submit_button = gr.Button("📩 Submit")
         
         submit_button.click(chatbot_function, [input_text, cite_details, citation_format, file], output)
         read_button.click(read_aloud, [output], None)
+        pause_button.click(pause_reading, [], None)
+        resume_button.click(resume_reading, [output], None)
         
     demo.launch(share=True)
 

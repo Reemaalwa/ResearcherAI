@@ -87,7 +87,7 @@ def main():
         submit_button.click(chatbot_function, [input_text, region, language, cite_details, citation_format, file], output)
         read_button.click(read_aloud, [output], None)
         
-    demo.launch()
+    demo.launch(share=True)
 
 if __name__ == "__main__":
     main()

@@ -1,93 +1,96 @@
 import gradio as gr
-import requests
-import PyPDF2
 import os
-import pyttsx3
-from langdetect import detect
+from groq import Groq
+from dotenv import load_dotenv
 
-def search_research_articles(query, region, language):
-    """Search for research articles using a web tool."""
-    # Using a web search tool (placeholder for actual implementation)
-    response = f"Searching for articles on '{query}' in {language} ({region})..."
-    return response
+# Load environment variables from .env file
+if not load_dotenv():
+    print("Warning: Could not load .env file. Ensure it's in the correct directory.")
 
-def summarize_file(file):
-    """Read and summarize uploaded PDF or text file."""
-    if file is None:
-        return "No file uploaded."
+# Fetch the API key
+api_key = os.getenv("GROQ_API_KEY")
+
+if not api_key:
+    raise ValueError("Error: GROQ_API_KEY is not set. Ensure your .env file is correctly loaded.")
+
+# Initialize Groq client
+client = Groq(api_key=api_key)
+
+# Initialize conversation history
+conversation_history = []
+
+def chat_with_researcher_ai(user_input, country_filter):
+    """
+    Handles user queries related to research with an option to filter results by country.
+    """
+    global conversation_history
     
-    file_path = file.name
-    try:
-        if file_path.endswith(".pdf"):
-            with open(file_path, "rb") as f:
-                pdf_reader = PyPDF2.PdfReader(f)
-                text = " ".join([page.extract_text() for page in pdf_reader.pages if page.extract_text()])
-        elif file_path.endswith(".txt"):
-            with open(file_path, "r", encoding="utf-8") as f:
-                text = f.read()
-        else:
-            return "Unsupported file format. Please upload a PDF or TXT file."
-        
-        summary = text[:500] + "..." if len(text) > 500 else text
-        return summary
-    except Exception as e:
-        return f"Error reading file: {str(e)}"
+    # Define the system message
+    system_message = "You are ResearcherAI, an expert in research methodologies, data analysis, and academic writing. Provide structured and insightful responses."
 
-def cite_paper(title, author, year, format_):
-    """Generate citations in different formats."""
-    citations = {
-        "APA": f"{author} ({year}). {title}.",
-        "MLA": f"{author}. \"{title}.\" {year}.",
-        "Chicago": f"{author}. {year}. \"{title}.\""
-    }
-    return citations.get(format_, "Format not supported.")
+    # Modify the query based on country selection
+    if country_filter and country_filter != "All":
+        system_message += f" When answering questions, only include information related to {country_filter}."
+        user_input = f"Provide information specifically about {user_input} in {country_filter}. Include facts, studies, and relevant data from {country_filter} only."
 
-def read_aloud(text):
-    """Convert text to speech."""
-    engine = pyttsx3.init()
-    engine.say(text)
-    engine.runAndWait()
-    return "Reading aloud..."
+    # Ensure system message is added only once
+    if not any(msg["role"] == "system" for msg in conversation_history):
+        conversation_history.insert(0, {"role": "system", "content": system_message})
 
-def chatbot_function(input_text, region, language, cite_details, citation_format, file):
-    """Main chatbot function to handle all tasks."""
-    response = ""
+    # Append user message
+    conversation_history.append({"role": "user", "content": user_input})
+
+    # Query AI model
+    completion = client.chat.completions.create(
+        model="llama3-70b-8192",
+        messages=conversation_history,
+        temperature=0.7,
+        max_tokens=1024,
+        top_p=1,
+        stream=False,
+        stop=None,
+    )
     
-    if input_text:
-        response += search_research_articles(input_text, region, language) + "\n\n"
+    response_content = completion.choices[0].message.content
     
-    if cite_details:
-        title, author, year = cite_details.split(",")
-        response += cite_paper(title.strip(), author.strip(), year.strip(), citation_format) + "\n\n"
+    conversation_history.append({"role": "assistant", "content": response_content})
     
-    if file:
-        response += summarize_file(file) + "\n\n"
-    
-    return response
+    return [(msg["content"] if msg["role"] == "user" else None, 
+             msg["content"] if msg["role"] == "assistant" else None) 
+            for msg in conversation_history]
 
-def main():
-    """Launch the Gradio interface."""
-    with gr.Blocks() as demo:
-        gr.Markdown("# Research Assistant Chatbot")
-        
-        with gr.Row():
-            input_text = gr.Textbox(label="Search Research Articles")
-            region = gr.Dropdown(["Global", "North America", "Europe", "Asia"], label="Region")
-            language = gr.Dropdown(["English", "French", "Spanish", "German"], label="Language")
-        
-        with gr.Row():
-            cite_details = gr.Textbox(label="Cite Paper (Title, Author, Year)")
-            citation_format = gr.Dropdown(["APA", "MLA", "Chicago"], label="Citation Format")
-        
-        file = gr.File(label="Upload File (PDF/TXT)")
-        output = gr.Textbox(label="Response", interactive=False)
-        read_button = gr.Button("Read Aloud")
-        submit_button = gr.Button("Submit")
-        
-        submit_button.click(chatbot_function, [input_text, region, language, cite_details, citation_format, file], output)
-        read_button.click(read_aloud, [output], None)
-        
-    demo.launch(share=True)
+# UI Styling and Layout
+TITLE = """
+<style>
+h1 { text-align: center; font-size: 24px; margin-bottom: 10px; }
+</style>
+<h1>🧠 ResearcherAI - Your Research Assistant</h1>
+"""
 
-if __name__ == "__main__":
-    main()
+with gr.Blocks(theme=gr.themes.Glass(primary_hue="blue", secondary_hue="blue", neutral_hue="gray")) as demo:
+    with gr.Tabs():
+        with gr.TabItem("💌 Research Chat"):
+            gr.HTML(TITLE)
+            chatbot = gr.Chatbot(label="ResearcherAI - Chat Assistant")
+            with gr.Row():
+                user_input = gr.Textbox(
+                    label="Your Query",
+                    placeholder="Ask about research methodologies, data analysis, academic writing...",
+                    lines=1
+                )
+                country_filter = gr.Dropdown(
+                    label="Filter by Country",
+                    choices=["All", "Canada", "USA", "UK", "Australia", "Germany"],
+                    value="All"
+                )
+            
+            send_button = gr.Button("🔍 Ask ResearcherAI")
+            
+            send_button.click(
+                fn=chat_with_researcher_ai,
+                inputs=[user_input, country_filter],
+                outputs=chatbot,
+                queue=True
+            )
+
+demo.launch()

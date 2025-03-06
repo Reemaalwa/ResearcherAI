@@ -80,7 +80,7 @@ with gr.Blocks(theme=gr.themes.Glass(primary_hue="blue", secondary_hue="blue", n
                 )
                 country_filter = gr.Dropdown(
                     label="Filter by Country",
-                    choices=["All", "Canada", "USA", "UK", "Australia", "Germany"],
+                    choices=["All", "Canada", "USA", "UK", "Australia", "Germany", "China"],
                     value="All"
                 )
             
